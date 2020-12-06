@@ -63,8 +63,7 @@ actix2-nightly = ["actix2", "paperclip-actix/nightly"]
 actix2 = ["actix-base", "paperclip-actix/actix2"]
 actix3 = ["actix-base", "paperclip-actix/actix3"]
 actix-base = ["v2", "paperclip-macros/actix"]
-
-# OpenAPI support (v2 and codegen)
+swagger-ui = ["paperclip-actix/swagger-ui"]
 cli = ["env_logger", "structopt", "git2", "v2", "codegen"]
 codegen = ["heck", "http", "log", "regex", "tinytemplate", "paperclip-core/codegen"]
 v2 = ["paperclip-macros/v2", "paperclip-core/v2"]

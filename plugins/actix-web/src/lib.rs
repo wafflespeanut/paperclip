@@ -19,14 +19,24 @@ use paperclip_core::v2::models::{
 };
 use parking_lot::RwLock;
 
+#[cfg(feature = "swagger-ui")]
+use tinytemplate::TinyTemplate;
+
+#[cfg(feature = "swagger-ui")]
+use serde::Serialize;
+
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
+#[cfg(feature = "swagger-ui")]
+static TEMPLATE: &str = include_str!("../../templates/swagger-ui.html");
+
 /// Wrapper for [`actix_web::App`](https://docs.rs/actix-web/*/actix_web/struct.App.html).
 pub struct App<T, B> {
     spec: Arc<RwLock<DefaultApiRaw>>,
+    spec_path: Option<String>,
     inner: Option<actix_web::App<T, B>>,
 }
 
@@ -50,6 +60,7 @@ impl<T, B> OpenApiExt<T, B> for actix_web::App<T, B> {
     fn wrap_api(self) -> Self::Wrapper {
         App {
             spec: Arc::new(RwLock::new(DefaultApiRaw::default())),
+            spec_path: None,
             inner: Some(self),
         }
     }
@@ -57,6 +68,7 @@ impl<T, B> OpenApiExt<T, B> for actix_web::App<T, B> {
     fn wrap_api_with_spec(self, spec: DefaultApiRaw) -> Self::Wrapper {
         App {
             spec: Arc::new(RwLock::new(spec)),
+            spec_path: None,
             inner: Some(self),
         }
     }
@@ -221,6 +233,7 @@ where
     {
         App {
             spec: self.spec,
+            spec_path: self.spec_path,
             inner: self.inner.take().map(|a| a.wrap(mw)),
         }
     }
@@ -248,6 +261,7 @@ where
     {
         App {
             spec: self.spec,
+            spec_path: self.spec_path,
             inner: self.inner.take().map(|a| a.wrap_fn(mw)),
         }
     }
@@ -256,12 +270,60 @@ where
     /// recorded by the wrapper and serves them in the given path
     /// as a JSON.
     pub fn with_json_spec_at(mut self, path: &str) -> Self {
+        self.spec_path = Some(path.to_owned());
         self.inner = self.inner.take().map(|a| {
             a.service(
                 actix_web::web::resource(path)
                     .route(actix_web::web::get().to(SpecHandler(self.spec.clone()))),
             )
         });
+        self
+    }
+
+    /// Exposes the previously built JSON specification with Swagger UI at the given path
+    ///
+    /// **NOTE:** you **MUST** call with_json_spec_at before calling this function
+    #[cfg(feature = "swagger-ui")]
+    pub fn with_swagger_ui_at(mut self, path: &str) -> Self {
+        self.inner = match self.spec_path.clone() {
+            Some(spec_path) => self.inner.take().map(|a| {
+                let mut tt = TinyTemplate::new();
+                let context = SwaggerUIContext {
+                    api_spec_url: spec_path,
+                };
+                // This is safe as we are using a given file as input so no errors can occur
+                let _ = tt.add_template("swagger-ui", TEMPLATE);
+                let rendered = tt.render("swagger-ui", &context);
+                match rendered {
+                    Ok(r) => {
+                        a.service(
+                            actix_web::web::resource(path.to_owned())
+                                .route(actix_web::web::get().to(SwaggerUIHandler(r))),
+                        )
+                    },
+                    Err(_) => {
+                        a.service(
+                            actix_web::web::resource(path.to_owned()).route(
+                            actix_web::web::get().to(|| {
+                                HttpResponse::InternalServerError().body(
+                                    "An error occurred while rendering Swagger-UI",
+                                )
+                            }),
+                        ))
+                    }
+                }
+
+            }),
+            None => self.inner.take().map(|a| {
+                a.service(actix_web::web::resource(path.to_owned()).route(
+                    actix_web::web::get().to(|| {
+                        HttpResponse::NotFound().body(
+                            "JSON specification not found.\nYou have to run with_json_spec_at(path) first.",
+                        )
+                    }),
+                ))
+            }),
+        };
         self
     }
 
@@ -312,5 +374,28 @@ impl actix_web::dev::Factory<(), Ready<Result<HttpResponse, Error>>, Result<Http
 {
     fn call(&self, _: ()) -> Ready<Result<HttpResponse, Error>> {
         fut_ok(HttpResponse::Ok().json(&*self.0.read()))
+    }
+}
+
+#[cfg(feature = "swagger-ui")]
+#[derive(Clone)]
+struct SwaggerUIHandler(String);
+
+#[cfg(feature = "swagger-ui")]
+#[derive(Serialize)]
+struct SwaggerUIContext {
+    api_spec_url: String,
+}
+
+#[cfg(feature = "swagger-ui")]
+impl actix_web::dev::Factory<(), Ready<Result<HttpResponse, Error>>, Result<HttpResponse, Error>>
+    for SwaggerUIHandler
+{
+    fn call(&self, _: ()) -> Ready<Result<HttpResponse, Error>> {
+        fut_ok(
+            HttpResponse::Ok()
+                .content_type("text/html")
+                .body(self.0.to_owned()),
+        )
     }
 }
