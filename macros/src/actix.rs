@@ -801,16 +801,30 @@ fn handle_unnamed_field_struct(
             let docs = extract_documentation(struct_attr);
             let docs = docs.trim();
 
-            props_gen.extend(quote!({
-                let mut s = #ty_ref::raw_schema();
-                if !#docs.is_empty() {
-                    s.description = Some(#docs.to_string());
-                }
-                schema = s;
-            }));
+            if SerdeSkip::exists(&field.attrs) {
+                props_gen.extend(quote!({
+                    let mut s: DefaultSchemaRaw = Default::default();
+                    if !#docs.is_empty() {
+                        s.description = Some(#docs.to_string());
+                    }
+                    schema = s;
+                }));
+            } else {
+                props_gen.extend(quote!({
+                    let mut s = #ty_ref::raw_schema();
+                    if !#docs.is_empty() {
+                        s.description = Some(#docs.to_string());
+                    }
+                    schema = s;
+                }));
+            }
         }
     } else {
         for (inner_field_id, field) in (&fields.unnamed).into_iter().enumerate() {
+            if SerdeSkip::exists(&field.attrs) {
+                continue;
+            }
+
             let ty_ref = get_field_type(&field);
 
             let docs = extract_documentation(&field.attrs);
@@ -917,6 +931,10 @@ fn handle_field_struct(
             .expect("missing field name?")
             .to_string();
 
+        if SerdeSkip::exists(&field.attrs) {
+            continue;
+        }
+
         if let Some(renamed) = SerdeRename::from_field_attrs(&field.attrs) {
             field_name = renamed;
         } else if let Some(prop) = serde.rename {
@@ -974,6 +992,10 @@ fn handle_enum(e: &DataEnum, serde: &SerdeProps, props_gen: &mut proc_macro2::To
                 emit_warning!(f.span().unwrap(), "skipping tuple enum variant in schema.");
                 continue;
             }
+        }
+
+        if SerdeSkip::exists(&var.attrs) {
+            continue;
         }
 
         if let Some(renamed) = SerdeRename::from_field_attrs(&var.attrs) {
@@ -1090,6 +1112,42 @@ impl SerdeRename {
             SerdeRename::Kebab => name.to_kebab_case(),
             SerdeRename::ScreamingKebab => name.to_kebab_case().to_uppercase(),
         }
+    }
+}
+
+/// Serde skip (https://serde.rs/variant-attrs.html)
+/// Never serialize or deserialize this variant.
+/// There are other variants available (skip_serializing,skip_deserializing) though it's not clear
+/// how this should be handled since we use the same Schema for Ser/DeSer
+struct SerdeSkip;
+
+impl SerdeSkip {
+    /// Traverses the field attributes and returns whether the field should be skipped or not
+    /// dependent on finding the `#[serde(skip]` attribute.
+    fn exists(field_attrs: &[Attribute]) -> bool {
+        for meta in field_attrs.iter().filter_map(|a| a.parse_meta().ok()) {
+            let inner_meta = match meta {
+                Meta::List(ref l)
+                    if l.path
+                        .segments
+                        .last()
+                        .map(|p| p.ident == "serde")
+                        .unwrap_or(false) =>
+                {
+                    &l.nested
+                }
+                _ => continue,
+            };
+            for meta in inner_meta {
+                if let NestedMeta::Meta(Meta::Path(path)) = meta {
+                    if path.segments.iter().any(|s| s.ident == "skip") {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
