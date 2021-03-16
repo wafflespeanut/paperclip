@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - Add support for actix-web-macros methods routing [PR#289](https://github.com/wafflespeanut/paperclip/pull/289)
+- Add support for the `#[serde(skip)]` attribute in structs and enums.
 
 ### Changed
 
