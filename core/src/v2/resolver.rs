@@ -263,7 +263,7 @@ where
     /// Given a name (from `$ref` field), get a reference to the definition.
     fn resolve_definition_reference(&self, name: &str) -> Result<Resolvable<S>, ValidationError> {
         if !name.starts_with(DEF_REF_PREFIX) {
-            return Err(ValidationError::InvalidRefURI(name.into()));
+            return Err(ValidationError::InvalidRefUri(name.into()));
         }
 
         let name = &name[DEF_REF_PREFIX.len()..];
@@ -280,7 +280,7 @@ where
         name: &str,
     ) -> Result<ResolvableParameter<S>, ValidationError> {
         if !name.starts_with(PARAM_REF_PREFIX) {
-            return Err(ValidationError::InvalidRefURI(name.into()));
+            return Err(ValidationError::InvalidRefUri(name.into()));
         }
 
         let name = &name[PARAM_REF_PREFIX.len()..];
@@ -297,7 +297,7 @@ where
         name: &str,
     ) -> Result<ResolvableResponse<S>, ValidationError> {
         if !name.starts_with(RESP_REF_PREFIX) {
-            return Err(ValidationError::InvalidRefURI(name.into()));
+            return Err(ValidationError::InvalidRefUri(name.into()));
         }
 
         let name = &name[RESP_REF_PREFIX.len()..];

@@ -19,7 +19,7 @@ matrix:
     - rustup toolchain install nightly
     - rustup default nightly
     script:
-    - cargo test --all --features "actix-nightly cli chrono uuid"
+    - cargo test --all --features "actix-nightly cli chrono uuid v3"
   - name: build
     script:
     - cargo build

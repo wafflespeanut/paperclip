@@ -31,6 +31,8 @@ serde_yaml = "0.8"
 uuid = { version = "0", optional = true }
 thiserror = "1.0"
 serde_qs = { version = "0", optional = true }
+openapiv3 = { version = "0.4.0", optional = true }
+indexmap = { version = "1.0", features = ["serde-1", "std"], optional = true }
 
 [features]
 # actix-web support
@@ -44,4 +46,5 @@ nightly = ["paperclip-macros/nightly"]
 
 # OpenAPI support (v2 and codegen)
 v2 = ["paperclip-macros/v2"]
+v3 = ["v2", "openapiv3", "indexmap"]
 codegen = ["v2", "heck", "log"]

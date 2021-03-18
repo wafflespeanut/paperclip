@@ -1174,7 +1174,7 @@ fn test_serde_flatten() {
         offset: Option<i32>,
         /// Return number of images
         size: Option<i32>,
-    };
+    }
 
     #[derive(Deserialize, Serialize, Apiv2Schema)]
     struct Paging {
@@ -1184,7 +1184,7 @@ fn test_serde_flatten() {
         total: i32,
         /// Page size
         size: i32,
-    };
+    }
 
     #[derive(Serialize, Apiv2Schema)]
     struct Image {
@@ -2915,4 +2915,12 @@ fn check_json(resp: reqwest::blocking::Response, expected: serde_json::Value) {
             expected.to_string()
         )
     }
+}
+
+#[cfg(feature = "v3")]
+#[test]
+fn test_openapi3() {
+    let spec = std::fs::File::open("tests/pet-v2.yaml").unwrap();
+    let spec: DefaultApiRaw = serde_yaml::from_reader(spec).unwrap();
+    let _spec_v3: openapiv3::OpenAPI = spec.into();
 }
