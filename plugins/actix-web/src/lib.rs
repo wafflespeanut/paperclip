@@ -286,6 +286,25 @@ where
         self.inner.expect("missing app?")
     }
 
+    /// Trim's the Api base path from the start of all method paths.
+    /// **NOTE:** much like `with_raw_json_spec` this only has the API spec built until
+    /// this function call. Any route handler added after this call won't have the base path trimmed.
+    /// So, it's important to call this function after adding all route handlers.
+    pub fn trim_base_path(self) -> Self {
+        {
+            let mut spec = self.spec.write();
+            let base_path = spec.base_path.clone().unwrap_or_default();
+            spec.paths = spec.paths.iter().fold(BTreeMap::new(), |mut i, (k, v)| {
+                i.insert(
+                    k.trim_start_matches(base_path.as_str()).to_string(),
+                    v.clone(),
+                );
+                i
+            });
+        }
+        self
+    }
+
     /// Updates the underlying spec with definitions and operations from the given factory.
     fn update_from_mountable<F>(&mut self, factory: &mut F)
     where
