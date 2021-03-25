@@ -10,7 +10,7 @@ pub enum ValidationError {
     ///
     /// Currently, we only support `#/{definitions,parameters}/Name` in `$ref` field.
     #[error("Invalid $ref URI {:?}. Only relative URIs are supported.", _0)]
-    InvalidRefURI(String),
+    InvalidRefUri(String),
     /// The specified reference is missing in the spec.
     #[error("Reference missing in spec: {}", _0)]
     MissingReference(String),

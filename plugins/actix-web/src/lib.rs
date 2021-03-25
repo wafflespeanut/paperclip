@@ -29,6 +29,8 @@ use std::{collections::BTreeMap, fmt::Debug, future::Future, sync::Arc};
 /// Wrapper for [`actix_web::App`](https://docs.rs/actix-web/*/actix_web/struct.App.html).
 pub struct App<T, B> {
     spec: Arc<RwLock<DefaultApiRaw>>,
+    #[cfg(feature = "v3")]
+    spec_v3: Option<Arc<RwLock<openapiv3::OpenAPI>>>,
     inner: Option<actix_web::App<T, B>>,
 }
 
@@ -52,6 +54,8 @@ impl<T, B> OpenApiExt<T, B> for actix_web::App<T, B> {
     fn wrap_api(self) -> Self::Wrapper {
         App {
             spec: Arc::new(RwLock::new(DefaultApiRaw::default())),
+            #[cfg(feature = "v3")]
+            spec_v3: None,
             inner: Some(self),
         }
     }
@@ -59,6 +63,8 @@ impl<T, B> OpenApiExt<T, B> for actix_web::App<T, B> {
     fn wrap_api_with_spec(self, spec: DefaultApiRaw) -> Self::Wrapper {
         App {
             spec: Arc::new(RwLock::new(spec)),
+            #[cfg(feature = "v3")]
+            spec_v3: None,
             inner: Some(self),
         }
     }
@@ -223,6 +229,8 @@ where
     {
         App {
             spec: self.spec,
+            #[cfg(feature = "v3")]
+            spec_v3: self.spec_v3,
             inner: self.inner.take().map(|a| a.wrap(mw)),
         }
     }
@@ -250,6 +258,8 @@ where
     {
         App {
             spec: self.spec,
+            #[cfg(feature = "v3")]
+            spec_v3: self.spec_v3,
             inner: self.inner.take().map(|a| a.wrap_fn(mw)),
         }
     }
@@ -262,6 +272,28 @@ where
             a.service(
                 actix_web::web::resource(path)
                     .route(actix_web::web::get().to(SpecHandler(self.spec.clone()))),
+            )
+        });
+        self
+    }
+
+    #[cfg(feature = "v3")]
+    /// Converts the generated v2 specification to v3 and then
+    /// mounts the v3 specification for all operations and definitions
+    /// recorded by the wrapper and serves them in the given path
+    /// as a JSON.
+    pub fn with_json_spec_v3_at(mut self, path: &str) -> Self {
+        let spec_v3 = if let Some(spec_v3) = &self.spec_v3 {
+            spec_v3.clone()
+        } else {
+            let spec_v3 = Arc::new(RwLock::new(openapiv3::OpenAPI::default()));
+            self.spec_v3 = Some(spec_v3.clone());
+            spec_v3
+        };
+        self.inner = self.inner.take().map(|a| {
+            a.service(
+                actix_web::web::resource(path)
+                    .route(actix_web::web::get().to(SpecHandlerV3(spec_v3.clone()))),
             )
         });
         self
@@ -281,8 +313,29 @@ where
         call(self, spec)
     }
 
+    #[cfg(feature = "v3")]
+    /// Calls the given function with `App` and JSON `Value` representing your API
+    /// v2 specification **built until now** which is converted to v3.
+    ///
+    /// **NOTE:** Unlike `with_json_spec_at`, this only has the API spec built until
+    /// this function call. Any route handler added after this call won't affect the
+    /// spec. So, it's important to call this function after adding all route handlers.
+    pub fn with_raw_json_spec_v3<F>(self, mut call: F) -> Self
+    where
+        F: FnMut(Self, serde_json::Value) -> Self,
+    {
+        let v3 = paperclip_core::v3::openapiv2_to_v3(self.spec.read().clone());
+        let spec = serde_json::to_value(v3).expect("generating json spec");
+        call(self, spec)
+    }
+
     /// Builds and returns the `actix_web::App`.
     pub fn build(self) -> actix_web::App<T, B> {
+        #[cfg(feature = "v3")]
+        self.spec_v3.clone().map(|v3| {
+            let mut v3 = v3.write();
+            *v3 = paperclip_core::v3::openapiv2_to_v3(self.spec.read().clone());
+        });
         self.inner.expect("missing app?")
     }
 
@@ -311,6 +364,19 @@ struct SpecHandler(Arc<RwLock<DefaultApiRaw>>);
 
 impl actix_web::dev::Factory<(), Ready<Result<HttpResponse, Error>>, Result<HttpResponse, Error>>
     for SpecHandler
+{
+    fn call(&self, _: ()) -> Ready<Result<HttpResponse, Error>> {
+        fut_ok(HttpResponse::Ok().json(&*self.0.read()))
+    }
+}
+
+#[cfg(feature = "v3")]
+#[derive(Clone)]
+struct SpecHandlerV3(Arc<RwLock<openapiv3::OpenAPI>>);
+
+#[cfg(feature = "v3")]
+impl actix_web::dev::Factory<(), Ready<Result<HttpResponse, Error>>, Result<HttpResponse, Error>>
+    for SpecHandlerV3
 {
     fn call(&self, _: ()) -> Ready<Result<HttpResponse, Error>> {
         fut_ok(HttpResponse::Ok().json(&*self.0.read()))

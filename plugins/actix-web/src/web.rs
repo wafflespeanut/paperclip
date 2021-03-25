@@ -538,8 +538,8 @@ impl ServiceFactory for Route {
     type Service = <actix_web::Route as ServiceFactory>::Service;
     type Future = <actix_web::Route as ServiceFactory>::Future;
 
+    #[allow(clippy::unit_arg)]
     fn new_service(&self, cfg: Self::Config) -> Self::Future {
-        #[allow(clippy::unit_arg)]
         self.inner.new_service(cfg)
     }
 }
