@@ -43,9 +43,11 @@ anyhow = "1.0"
 once_cell = "1.4"
 
 [dev-dependencies]
-actix-rt = "1"
-actix-service = "1"
-actix-web = { version = "3", default-features = false }
+actix-service1 = { version = "1", package = "actix-service" }
+actix-service2 = { version = "2.0.0-beta.4", package = "actix-service" }
+actix-web2 = { version = "2", default-features = false, package = "actix-web" }
+actix-web3 = { version = "3", default-features = false, package = "actix-web" }
+actix-web4 = { version = "4.0.0-beta.5", default-features = false, package = "actix-web" }
 chrono_dev = { version = "0.4", features = ["serde"], package = "chrono" }
 futures = "0.3"
 uuid_dev = { version = "0.8", features = ["serde"], package = "uuid" }
@@ -56,12 +58,14 @@ env_logger = "0.8"
 
 [features]
 # actix-web support
-actix = ["actix3"]
-actix-nightly = ["actix3-nightly"]
-actix3-nightly = ["actix3", "paperclip-actix/nightly"]
+actix = ["actix4"]
+actix-nightly = ["actix4-nightly"]
 actix2-nightly = ["actix2", "paperclip-actix/nightly"]
+actix3-nightly = ["actix3", "paperclip-actix/nightly"]
+actix4-nightly = ["actix4", "paperclip-actix/nightly"]
 actix2 = ["actix-base", "paperclip-actix/actix2"]
 actix3 = ["actix-base", "paperclip-actix/actix3"]
+actix4 = ["actix-base", "paperclip-actix/actix4"]
 actix-base = ["v2", "paperclip-macros/actix"]
 
 # OpenAPI support (v2 and codegen)

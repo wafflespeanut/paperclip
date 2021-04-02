@@ -5,6 +5,8 @@
 extern crate actix_web2 as actix_web;
 #[cfg(feature = "actix3")]
 extern crate actix_web3 as actix_web;
+#[cfg(feature = "actix4")]
+extern crate actix_web4 as actix_web;
 #[cfg_attr(feature = "v2", macro_use)]
 extern crate serde;
 

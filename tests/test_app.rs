@@ -3,7 +3,18 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
-use actix_rt::System;
+#[cfg(any(feature = "actix2", feature = "actix3"))]
+extern crate actix_service1 as actix_service;
+#[cfg(feature = "actix4")]
+extern crate actix_service2 as actix_service;
+
+#[cfg(feature = "actix2")]
+extern crate actix_web2 as actix_web;
+#[cfg(feature = "actix3")]
+extern crate actix_web3 as actix_web;
+#[cfg(feature = "actix4")]
+extern crate actix_web4 as actix_web;
+
 use actix_service::ServiceFactory;
 use actix_web::{
     dev::{MessageBody, Payload, ServiceRequest, ServiceResponse},
@@ -68,6 +79,19 @@ impl Default for Pet {
     }
 }
 
+#[cfg(feature = "actix4")]
+impl Responder for Pet {
+    fn respond_to(self, _req: &HttpRequest) -> actix_web::HttpResponse {
+        let body = serde_json::to_string(&self).unwrap();
+
+        // Create response and set content type
+        actix_web::HttpResponse::Ok()
+            .content_type("application/json")
+            .body(body)
+    }
+}
+
+#[cfg(not(feature = "actix4"))]
 impl Responder for Pet {
     type Error = Error;
     type Future = Ready<Result<actix_web::HttpResponse, Error>>;
@@ -1174,7 +1198,7 @@ fn test_serde_flatten() {
         offset: Option<i32>,
         /// Return number of images
         size: Option<i32>,
-    };
+    }
 
     #[derive(Deserialize, Serialize, Apiv2Schema)]
     struct Paging {
@@ -1184,7 +1208,7 @@ fn test_serde_flatten() {
         total: i32,
         /// Page size
         size: i32,
-    };
+    }
 
     #[derive(Serialize, Apiv2Schema)]
     struct Image {
@@ -2191,6 +2215,7 @@ fn test_multiple_method_routes() {
         ready("post".into())
     }
 
+    #[cfg(any(feature = "actix2", feature = "actix3"))]
     fn test_app<F, T, B>(f: F)
     where
         F: Fn() -> App<T, B> + Clone + Send + Sync + 'static,
@@ -2198,6 +2223,60 @@ fn test_multiple_method_routes() {
         T: ServiceFactory<
                 Config = (),
                 Request = ServiceRequest,
+                Response = ServiceResponse<B>,
+                Error = Error,
+                InitError = (),
+            > + 'static,
+    {
+        run_and_check_app(f, |addr| {
+            let resp = CLIENT
+                .get(&format!("http://{}/v1/foo", addr))
+                .send()
+                .expect("request failed?");
+            assert_eq!(resp.status().as_u16(), 200);
+            assert_eq!(resp.text().unwrap(), "get");
+
+            let resp = CLIENT
+                .post(&format!("http://{}/v1/foo", addr))
+                .send()
+                .expect("request failed?");
+            assert_eq!(resp.status().as_u16(), 200);
+            assert_eq!(resp.text().unwrap(), "post");
+
+            let resp = CLIENT
+                .get(&format!("http://{}/api/spec", addr))
+                .send()
+                .expect("request failed?");
+
+            check_json(
+                resp,
+                json!({
+                  "info":{"title":"","version":""},
+                  "definitions": {},
+                  "paths": {
+                    "/v1/foo": {
+                      "get": {
+                        "responses": {},
+                      },
+                      "post": {
+                        "responses": {},
+                      },
+                    }
+                  },
+                  "swagger": "2.0",
+                }),
+            );
+        });
+    }
+
+    #[cfg(feature = "actix4")]
+    fn test_app<F, T, B>(f: F)
+    where
+        F: Fn() -> App<T, B> + Clone + Send + Sync + 'static,
+        B: MessageBody + 'static,
+        T: ServiceFactory<
+                ServiceRequest,
+                Config = (),
                 Response = ServiceResponse<B>,
                 Error = Error,
                 InitError = (),
@@ -2854,6 +2933,7 @@ fn test_method_macro() {
     );
 }
 
+#[cfg(any(feature = "actix2", feature = "actix3"))]
 fn run_and_check_app<F, G, T, B, U>(factory: F, check: G) -> U
 where
     F: Fn() -> App<T, B> + Clone + Send + Sync + 'static,
@@ -2870,7 +2950,7 @@ where
     let (tx, rx) = mpsc::channel();
 
     let _ = thread::spawn(move || {
-        let sys = System::new("test");
+        let sys = actix_web::rt::System::new();
         for port in 3000..30000 {
             if !PORTS.lock().insert(port) {
                 continue;
@@ -2888,6 +2968,54 @@ where
             let s = server.run();
             tx.send((s, addr)).unwrap();
             sys.run().expect("system error?");
+            return;
+        }
+
+        unreachable!("No ports???");
+    });
+
+    let (_server, addr) = rx.recv().unwrap();
+    let ret = check(addr);
+    let _ = _server.stop(true);
+    ret
+}
+
+#[cfg(feature = "actix4")]
+fn run_and_check_app<F, G, T, B, U>(factory: F, check: G) -> U
+where
+    F: Fn() -> App<T, B> + Clone + Send + Sync + 'static,
+    B: MessageBody + 'static,
+    T: ServiceFactory<
+            ServiceRequest,
+            Config = (),
+            Response = ServiceResponse<B>,
+            Error = Error,
+            InitError = (),
+        > + 'static,
+    G: Fn(String) -> U,
+{
+    let (tx, rx) = mpsc::channel();
+
+    let _ = thread::spawn(move || {
+        let sys = actix_web::rt::System::new();
+        for port in 3000..30000 {
+            if !PORTS.lock().insert(port) {
+                continue;
+            }
+
+            let addr = format!("127.0.0.1:{}", port);
+            let server = match HttpServer::new(factory.clone()).bind(&addr) {
+                Ok(srv) => {
+                    println!("Bound to {}", addr);
+                    srv
+                }
+                Err(_) => continue,
+            };
+
+            sys.block_on(async move {
+                let s = server.run();
+                tx.send((s, addr)).unwrap();
+            });
             return;
         }
 
