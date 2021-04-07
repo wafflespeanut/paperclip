@@ -1,8 +1,14 @@
 //! Core types and traits associated with the
 //! [OpenAPI v2 specification](https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md).
 
-#[cfg(feature = "actix-base")]
+#[cfg(feature = "actix4")]
 mod actix;
+
+#[cfg(any(feature = "actix2", feature = "actix3"))]
+mod actix3;
+#[cfg(any(feature = "actix2", feature = "actix3"))]
+use actix3 as actix;
+
 mod extensions;
 pub mod models;
 #[cfg(feature = "codegen")]
