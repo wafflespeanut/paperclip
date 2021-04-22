@@ -185,20 +185,100 @@ pub mod client \{
         async fn make_request(&self, req: Self::Request) -> Result<Self::Response, ApiError<Self::Response>>;
     }
 
+    /// Defines api key that will be used for all requests.
+    #[derive(Clone)]
+    pub struct ApiKey \{
+        /// Key will be sent in this HTTP header
+        pub header_name: String,
+        /// Key itself
+        pub key: String,
+    }
+
+    #[derive(Clone)]
+    pub struct ClientConfiguration \{
+        base_url: String,
+        api_key: Option<ApiKey>
+    }
+
+    impl ClientConfiguration \{
+        pub fn new() -> ClientConfiguration \{
+            ClientConfiguration \{
+                base_url: String::from("{base_url | unescaped}"),
+                api_key: None,
+            }
+        }
+
+        pub fn set_base_url(&mut self, url: impl Into<String>) -> &mut Self \{
+            self.base_url = url.into();
+            self
+        }
+
+        pub fn set_api_key(&mut self, api_key: ApiKey) -> &mut Self \{
+            self.api_key = Some(api_key);
+            self
+        }
+
+        pub fn remove_api_key(&mut self) -> &mut Self \{
+            self.api_key.take();
+            self
+        }
+    }
+
+    impl Default for ClientConfiguration \{
+        fn default() -> ClientConfiguration \{
+            ClientConfiguration::new()
+        }
+    }
+
+    pub struct Client \{
+        client: reqwest::Client,
+        cfg: ClientConfiguration,
+    }
+
+    impl Client \{
+        pub fn new(cfg: ClientConfiguration) -> Client \{
+            Client \{
+                client: reqwest::Client::new(),
+                cfg
+            }
+        }
+
+        /// Returns currently used configuration
+        pub fn config(&self) -> &ClientConfiguration \{
+            &self.cfg
+        }
+
+        /// Returns mutable reference to currently used configuration.
+        /// If you modify it, all subsequent API requests will be affected.
+        pub fn config_mut(&mut self) -> &mut ClientConfiguration \{
+            &mut self.cfg
+        }
+    }
+
+    impl Default for Client \{
+        fn default() -> Client \{
+            Client::new(ClientConfiguration::new())
+        }
+    }
+
     #[async_trait::async_trait]
-    impl ApiClient for reqwest::Client \{
+    impl ApiClient for Client \{
         type Request = reqwest::RequestBuilder;
         type Response = reqwest::Response;
 
         fn request_builder(&self, method: http::Method, rel_path: &str) -> Self::Request \{
-            let mut u = String::from("{base_url | unescaped}");
+            let mut u = self.cfg.base_url.clone();
             u.push_str(rel_path.trim_start_matches('/'));
-            self.request(method, &u)
+            let mut builder = self.client.request(method, &u);
+            if let Some(key) = &self.cfg.api_key \{
+                builder = builder.header(key.header_name.as_str(), key.key.as_str());
+            }
+            builder
         }
 
         async fn make_request(&self, req: Self::Request) -> Result<Self::Response, ApiError<Self::Response>> \{
             let req = req.build().map_err(ApiError::Reqwest)?;
-            let resp = self.execute(req).await.map_err(ApiError::Reqwest)?;
+            let resp = self.client.execute(req).await.map_err(ApiError::Reqwest)?;
             Ok(resp)
         }
     }
