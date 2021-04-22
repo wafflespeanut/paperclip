@@ -16,6 +16,7 @@ use syn::{
     ReturnType, Token, TraitBound, Type, TypeTraitObject,
 };
 
+use proc_macro2::TokenStream as TokenStream2;
 use std::collections::HashMap;
 
 const SCHEMA_MACRO_ATTR: &str = "openapi";
@@ -364,25 +365,25 @@ pub fn emit_v2_errors(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let generics = item_ast.generics.clone();
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    // Convert macro attributes to tuples in form of (u16, &str)
+    let mut default_schema: Option<syn::Ident> = None;
+    // Convert macro attributes to tuples in form of (u16, &str, &Option<syn::Ident>)
     let error_codes = attrs
         .0
         .iter()
         // Pair code attrs with description attrs; save attr itself to properly span error messages at later stage
-        .fold(Vec::new(), |mut list: Vec<(Option<u16>, Option<String>, _)>, attr| {
+        .fold(Vec::new(), |mut list: Vec<(Option<u16>, Option<String>, Option<syn::Ident>, _)>, attr| {
             let span = attr.span().unwrap();
             match attr {
                 // Read named attribute.
                 NestedMeta::Meta(Meta::NameValue(name_value)) => {
                     let attr_name = name_value.path.get_ident().map(|ident| ident.to_string());
                     let attr_value = &name_value.lit;
-
                     match (attr_name.as_deref(), attr_value) {
                         // "code" attribute adds new element to list
                         (Some("code"), Lit::Int(attr_value)) => {
                             let status_code = attr_value.base10_parse::<u16>()
                                 .map_err(|_| emit_error!(span, "Invalid u16 in code argument")).ok();
-                            list.push((status_code, None, attr));
+                            list.push((status_code, None, None, attr));
                         },
                         // "description" attribute updates last element in list
                         (Some("description"), Lit::Str(attr_value)) =>
@@ -394,26 +395,46 @@ pub fn emit_v2_errors(attrs: TokenStream, input: TokenStream) -> TokenStream {
                             } else {
                                 emit_error!(span, "Attribute 'description' can be only placed after prior 'code' argument");
                             },
-                        _ => emit_error!(span, "Invalid macro attribute. Should be plain u16, 'code = u16' or 'description = str'")
+                        // "schema" attribute updates last element in list
+                        (Some("schema"), Lit::Str(attr_value)) =>
+                            if let Some(last_value) = list.last_mut() {
+                                if last_value.2.is_some() {
+                                    emit_warning!(span, "This attribute overwrites previous schema");
+                                }
+                                match attr_value.parse() {
+                                    Ok(value) => last_value.2 = Some(value),
+                                    Err(error) => emit_error!(span, "Error parsing schema: {}", error),
+                                }
+                            } else {
+                                emit_error!(span, "Attribute 'schema' can be only placed after prior 'code' argument");
+                            },
+                        (Some("default_schema"), Lit::Str(attr_value)) =>
+                            match attr_value.parse() {
+                                Ok(value) => default_schema = Some(value),
+                                Err(error) => emit_error!(span, "Error parsing default_schema: {}", error),
+                            },
+                        _ => emit_error!(span, "Invalid macro attribute. Should be plain u16, 'code = u16', 'description = str', 'schema = str' or 'default_schema = str'")
                     }
                 },
                 // Read plain status code as attribute.
                 NestedMeta::Lit(Lit::Int(attr_value)) => {
                     let status_code = attr_value.base10_parse::<u16>()
                     .map_err(|_| emit_error!(span, "Invalid u16 in code argument")).ok();
-                    list.push((status_code, None, attr));
+                    list.push((status_code, None, None, attr));
                 },
-                _ => emit_error!(span, "This macro supports only named attributes - 'code' (u16) or 'description' (str)")
+                _ => emit_error!(span, "This macro supports only named attributes - 'code' (u16), 'description' (str), 'schema' (str) or 'default_schema' (str)")
             }
 
             list
         })
         .iter()
         // Map code-message pairs into bits of code, filter empty codes out
-        .filter_map(|triple| {
-            let (code, description) = match triple {
-                (Some(code), Some(description), _) => (code, description.to_owned()),
-                (Some(code), None, attr) => {
+        .filter_map(|quad| {
+            let (code, description, schema) = match quad {
+                (Some(code), Some(description), schema, _) => {
+                    (code, description.to_owned(), schema.to_owned())
+                },
+                (Some(code), None, schema, attr) => {
                     let span = attr.span().unwrap();
                     let description = StatusCode::from_u16(*code)
                         .map_err(|_| {
@@ -428,16 +449,179 @@ pub fn emit_v2_errors(attrs: TokenStream, input: TokenStream) -> TokenStream {
                             })
                         )
                         .unwrap_or_else(|_| String::new());
-                    (code, description)
+                    (code, description, schema.to_owned())
                 },
-                (None, _, _) => return None,
+                (None, _, _, _) => return None,
             };
-
-            Some(quote! {
-                (#code, #description),
-            })
+            Some((*code, description, schema))
         })
-        .fold(proc_macro2::TokenStream::new(), |mut stream, tokens| {
+        .collect::<Vec<(u16, String, Option<syn::Ident>)>>();
+
+    let error_definitions = error_codes.iter().fold(
+        if default_schema.is_none() {
+            TokenStream2::new()
+        } else {
+            quote! {
+                #default_schema::update_definitions(map);
+            }
+        },
+        |mut stream, (_, _, schema)| {
+            if let Some(schema) = schema {
+                let tokens = quote! {
+                    #schema::update_definitions(map);
+                };
+                stream.extend(tokens);
+            }
+            stream
+        },
+    );
+
+    let update_definitions = quote! {
+        fn update_definitions(map: &mut std::collections::BTreeMap<String, paperclip::v2::models::DefaultSchemaRaw>) {
+            use paperclip::actix::OperationModifier;
+            #error_definitions
+        }
+    };
+
+    // for compatibility with previous error trait
+    let error_map = error_codes.iter().fold(
+        proc_macro2::TokenStream::new(),
+        |mut stream, (code, description, _)| {
+            let token = quote! {
+                (#code, #description),
+            };
+            stream.extend(token);
+            stream
+        },
+    );
+
+    let update_error_helper = quote! {
+        fn update_error_definitions(code: &u16, description: &str, schema: &Option<&str>, op: &mut paperclip::v2::models::DefaultOperationRaw) {
+            if let Some(schema) = &schema {
+                op.responses.insert(code.to_string(), paperclip::v2::models::Either::Right(paperclip::v2::models::Response {
+                    description: Some(description.to_string()),
+                    schema: Some(paperclip::v2::models::DefaultSchemaRaw {
+                        name: Some(schema.to_string()),
+                        reference: Some(format!("#/definitions/{}", schema)),
+                        .. Default::default()
+                    }),
+                    ..Default::default()
+                }));
+            } else {
+                op.responses.insert(code.to_string(), paperclip::v2::models::Either::Right(paperclip::v2::models::DefaultResponseRaw {
+                    description: Some(description.to_string()),
+                    ..Default::default()
+                }));
+            }
+        }
+    };
+    let default_schema = default_schema.map(|i| i.to_string());
+    let update_errors = error_codes.iter().fold(
+        update_error_helper,
+        |mut stream, (code, description, schema)| {
+            let tokens = if let Some(schema) = schema {
+                let schema = schema.to_string();
+                quote! {
+                    update_error_definitions(&#code, #description, &Some(#schema), op);
+                }
+            } else if let Some(scheme) = &default_schema {
+                quote! {
+                    update_error_definitions(&#code, #description, &Some(#scheme), op);
+                }
+            } else {
+                quote! {
+                    update_error_definitions(&#code, #description, &None, op);
+                }
+            };
+            stream.extend(tokens);
+            stream
+        },
+    );
+
+    let gen = quote! {
+        #item_ast
+
+        impl #impl_generics paperclip::v2::schema::Apiv2Errors for #name #ty_generics #where_clause {
+            const ERROR_MAP: &'static [(u16, &'static str)] = &[
+                #error_map
+            ];
+            fn update_error_definitions(op: &mut paperclip::v2::models::DefaultOperationRaw) {
+                #update_errors
+            }
+            #update_definitions
+        }
+    };
+
+    gen.into()
+}
+
+/// Actual parser and emitter for `emit_v2_errors_overlay` macro.
+pub fn emit_v2_errors_overlay(attrs: TokenStream, input: TokenStream) -> TokenStream {
+    let item_ast = match crate::expect_struct_or_enum(input) {
+        Ok(i) => i,
+        Err(ts) => return ts,
+    };
+
+    let name = &item_ast.ident;
+    let inner = match &item_ast.data {
+        Data::Struct(s) => if s.fields.len() == 1 {
+            match &s.fields {
+                Fields::Unnamed(s) => s.unnamed.first().map(|s| match &s.ty {
+                    Type::Path(s) => s.path.segments.first().map(|f| &f.ident),
+                    _ => None,
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        }
+        .flatten()
+        .unwrap_or_else(|| {
+            abort!(
+                s.fields.span(),
+                "This macro supports only unnamed structs with 1 element"
+            )
+        }),
+        _ => {
+            abort!(item_ast.span(), "This macro supports only unnamed structs");
+        }
+    };
+
+    let attrs = crate::parse_input_attrs(attrs);
+    let generics = item_ast.generics.clone();
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    // Convert macro attributes to vector of u16
+    let error_codes = attrs
+        .0
+        .iter()
+        // Pair code attrs with description attrs; save attr itself to properly span error messages at later stage
+        .fold(Vec::new(), |mut list: Vec<u16>, attr| {
+            let span = attr.span().unwrap();
+            match attr {
+                // Read plain status code as attribute.
+                NestedMeta::Lit(Lit::Int(attr_value)) => {
+                    let status_code = attr_value
+                        .base10_parse::<u16>()
+                        .map_err(|_| emit_error!(span, "Invalid u16 in code argument"))
+                        .unwrap();
+                    list.push(status_code);
+                }
+                _ => emit_error!(
+                    span,
+                    "This macro supports only named attributes - 'code' (u16)"
+                ),
+            }
+
+            list
+        });
+    let filter_error_codes = error_codes
+        .iter()
+        .fold(TokenStream2::new(), |mut stream, code| {
+            let status_code = &code.to_string();
+            let tokens = quote! {
+                op.responses.remove(#status_code);
+            };
             stream.extend(tokens);
             stream
         });
@@ -445,10 +629,30 @@ pub fn emit_v2_errors(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let gen = quote! {
         #item_ast
 
+        impl std::fmt::Display for #name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        impl actix_web::error::ResponseError for #name {
+            fn status_code(&self) -> actix_web::http::StatusCode {
+                self.0.status_code()
+            }
+            fn error_response(&self) -> actix_web::HttpResponse {
+                self.0.error_response()
+            }
+        }
+
         impl #impl_generics paperclip::v2::schema::Apiv2Errors for #name #ty_generics #where_clause {
-            const ERROR_MAP: &'static [(u16, &'static str)] = &[
-                #error_codes
-            ];
+            const ERROR_MAP: &'static [(u16, &'static str)] = &[];
+            fn update_definitions(map: &mut std::collections::BTreeMap<String, paperclip::v2::models::DefaultSchemaRaw>) {
+                #inner::update_definitions(map);
+            }
+            fn update_error_definitions(op: &mut paperclip::v2::models::DefaultOperationRaw) {
+                #inner::update_error_definitions(op);
+                #filter_error_codes
+            }
         }
     };
 

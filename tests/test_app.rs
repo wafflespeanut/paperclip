@@ -13,8 +13,8 @@ use futures::future::{ok as fut_ok, ready, Future, Ready};
 use once_cell::sync::Lazy;
 use paperclip::{
     actix::{
-        api_v2_errors, api_v2_operation, delete, get, post, put, web, Apiv2Schema, Apiv2Security,
-        CreatedJson, NoContent, OpenApiExt,
+        api_v2_errors, api_v2_errors_overlay, api_v2_operation, delete, get, post, put, web,
+        Apiv2Schema, Apiv2Security, CreatedJson, NoContent, OpenApiExt,
     },
     v2::models::{DefaultApiRaw, Info, Tag},
 };
@@ -2358,18 +2358,51 @@ fn test_errors_app() {
     };
     use std::fmt;
 
+    #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
+    struct PetErrorScheme1 {}
+    #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
+    struct PetErrorScheme2 {}
+    #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
+    struct PetErrorScheme3 {}
+
     #[api_v2_errors(
         400,
         description = "Sorry, bad request",
         code = 401,
         code = 403,
+        schema = "PetErrorScheme1",
         description = "Forbidden, go away",
-        500
+        500,
+        description = "Internal Server Error",
+        schema = "PetErrorScheme2"
     )]
     #[derive(Debug)]
     struct PetError {}
 
+    #[api_v2_errors(
+        400,
+        description = "Sorry, bad request",
+        code = 401,
+        code = 403,
+        schema = "PetErrorScheme1",
+        description = "Forbidden, go away",
+        500,
+        description = "Internal Server Error",
+        default_schema = "PetErrorScheme2"
+    )]
+    #[derive(Debug)]
+    struct PetError2 {}
+
+    #[api_v2_errors_overlay(401)]
+    #[derive(Debug)]
+    struct PetErrorOverlay(pub PetError2);
+
     impl fmt::Display for PetError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Bad Request")
+        }
+    }
+    impl fmt::Display for PetError2 {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "Bad Request")
         }
@@ -2380,14 +2413,27 @@ fn test_errors_app() {
             HttpResponse::from_error(ErrorBadRequest("Bad Request"))
         }
     }
+    impl ResponseError for PetError2 {
+        fn error_response(&self) -> HttpResponse {
+            HttpResponse::from_error(ErrorBadRequest("Bad Request"))
+        }
+    }
 
     #[api_v2_operation]
     async fn echo_pet_with_errors(body: web::Json<Pet>) -> Result<web::Json<Pet>, PetError> {
         Ok(body)
     }
 
+    #[api_v2_operation]
+    async fn echo_pet_with_errors2(
+        body: web::Json<Pet>,
+    ) -> Result<web::Json<Pet>, PetErrorOverlay> {
+        Ok(body)
+    }
+
     fn config(cfg: &mut web::ServiceConfig) {
         cfg.service(web::resource("/echo").route(web::post().to(echo_pet_with_errors)));
+        cfg.service(web::resource("/echo2").route(web::post().to(echo_pet_with_errors2)));
     }
 
     run_and_check_app(
@@ -2439,7 +2485,13 @@ fn test_errors_app() {
                       },
                       "required":["birthday", "class", "name"],
                       "type":"object"
-                    }
+                    },
+                    "PetErrorScheme1": {
+                      "type": "object"
+                    },
+                    "PetErrorScheme2": {
+                      "type": "object"
+                    },
                   },
                   "paths": {
                     "/api/echo": {
@@ -2466,10 +2518,54 @@ fn test_errors_app() {
                             "description": "Unauthorized"
                           },
                           "403":{
-                            "description":"Forbidden, go away"
+                            "description": "Forbidden, go away",
+                            "schema": {
+                              "$ref": "#/definitions/PetErrorScheme1"
+                            }
                           },
                           "500": {
-                            "description": "Internal Server Error"
+                            "description": "Internal Server Error",
+                            "schema": {
+                              "$ref": "#/definitions/PetErrorScheme2"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "/api/echo2": {
+                      "post": {
+                        "parameters": [{
+                            "in": "body",
+                            "name": "body",
+                            "required": true,
+                            "schema": {
+                              "$ref": "#/definitions/Pet"
+                            }
+                          }],
+                        "responses": {
+                          "200": {
+                            "description": "OK",
+                            "schema": {
+                              "$ref": "#/definitions/Pet"
+                            }
+                          },
+                          "400": {
+                            "description": "Sorry, bad request",
+                            "schema": {
+                              "$ref": "#/definitions/PetErrorScheme2"
+                            }
+                          },
+                          "403":{
+                            "description": "Forbidden, go away",
+                            "schema": {
+                              "$ref": "#/definitions/PetErrorScheme1"
+                            }
+                          },
+                          "500": {
+                            "description": "Internal Server Error",
+                            "schema": {
+                              "$ref": "#/definitions/PetErrorScheme2"
+                            }
                           }
                         }
                       }
@@ -2495,8 +2591,8 @@ fn test_security_app() {
     struct AccessToken;
 
     impl FromRequest for AccessToken {
-        type Future = Ready<Result<Self, Self::Error>>;
         type Error = Error;
+        type Future = Ready<Result<Self, Self::Error>>;
         type Config = ();
 
         fn from_request(_: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
@@ -2515,8 +2611,8 @@ fn test_security_app() {
     struct OAuth2Access;
 
     impl FromRequest for OAuth2Access {
-        type Future = Ready<Result<Self, Self::Error>>;
         type Error = Error;
+        type Future = Ready<Result<Self, Self::Error>>;
         type Config = ();
 
         fn from_request(_: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
@@ -2529,8 +2625,8 @@ fn test_security_app() {
     struct PetScope;
 
     impl FromRequest for PetScope {
-        type Future = Ready<Result<Self, Self::Error>>;
         type Error = Error;
+        type Future = Ready<Result<Self, Self::Error>>;
         type Config = ();
 
         fn from_request(_: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {

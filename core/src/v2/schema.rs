@@ -478,6 +478,8 @@ pub trait Apiv2Operation {
 /// - [`paperclip_actix::api_v2_errors`](https://paperclip.waffles.space/paperclip_actix/attr.api_v2_errors.html).
 pub trait Apiv2Errors {
     const ERROR_MAP: &'static [(u16, &'static str)] = &[];
+    fn update_error_definitions(_op: &mut DefaultOperationRaw) {}
+    fn update_definitions(_map: &mut BTreeMap<String, DefaultSchemaRaw>) {}
 }
 
 impl Apiv2Errors for () {}

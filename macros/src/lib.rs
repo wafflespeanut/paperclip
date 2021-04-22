@@ -68,6 +68,15 @@ pub fn api_v2_errors(attrs: TokenStream, input: TokenStream) -> TokenStream {
     self::actix::emit_v2_errors(attrs, input)
 }
 
+/// Marker attribute for indicating that the marked object can filter error responses from the
+/// the `#[api_v2_errors]` macro.
+#[cfg(feature = "actix")]
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn api_v2_errors_overlay(attrs: TokenStream, input: TokenStream) -> TokenStream {
+    self::actix::emit_v2_errors_overlay(attrs, input)
+}
+
 /// Generate an error at the call site and return empty token stream.
 #[allow(dead_code)]
 fn span_error_with_msg<T: Spanned>(it: &T, msg: &str) -> TokenStream {

@@ -2,8 +2,8 @@
 use super::schema::TypedData;
 use super::{
     models::{
-        DefaultOperationRaw, DefaultResponseRaw, DefaultSchemaRaw, Either, Items, Parameter,
-        ParameterIn, Response, SecurityScheme,
+        DefaultOperationRaw, DefaultSchemaRaw, Either, Items, Parameter, ParameterIn, Response,
+        SecurityScheme,
     },
     schema::{Apiv2Errors, Apiv2Operation, Apiv2Schema},
 };
@@ -133,11 +133,12 @@ where
 
     fn update_response(op: &mut DefaultOperationRaw) {
         T::update_response(op);
-        update_error_definitions_from_schema_type::<E>(op);
+        E::update_error_definitions(op);
     }
 
     fn update_definitions(map: &mut BTreeMap<String, DefaultSchemaRaw>) {
         T::update_definitions(map);
+        E::update_definitions(map);
     }
 
     fn update_security_definitions(map: &mut BTreeMap<String, SecurityScheme>) {
@@ -529,22 +530,6 @@ where
         }
 
         break;
-    }
-}
-
-/// Given a schema type that represents an error, add the responses
-/// representing those errors.
-fn update_error_definitions_from_schema_type<T>(op: &mut DefaultOperationRaw)
-where
-    T: Apiv2Errors,
-{
-    for (status, def_name) in T::ERROR_MAP {
-        let response = DefaultResponseRaw {
-            description: Some((*def_name).to_string()),
-            ..Default::default()
-        };
-        op.responses
-            .insert(status.to_string(), Either::Right(response));
     }
 }
 
