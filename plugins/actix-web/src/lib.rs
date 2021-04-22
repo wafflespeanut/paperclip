@@ -281,6 +281,11 @@ where
         call(self, spec)
     }
 
+    // Returns the spec as a serde value. Does not continue to build the application.
+    pub fn spec(self) -> serde_json::Value {
+        serde_json::to_value(&*self.spec.read()).expect("generating json spec")
+    }
+
     /// Builds and returns the `actix_web::App`.
     pub fn build(self) -> actix_web::App<T, B> {
         self.inner.expect("missing app?")
