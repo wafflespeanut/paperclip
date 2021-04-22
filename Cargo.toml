@@ -44,7 +44,7 @@ once_cell = "1.4"
 
 [dev-dependencies]
 actix-rt = "1"
-actix-service = "1"
+actix-service = "2"
 actix-web = { version = "3", default-features = false }
 chrono_dev = { version = "0.4", features = ["serde"], package = "chrono" }
 futures = "0.3"
