@@ -365,6 +365,17 @@ paths:
       responses:
         '200':
           $ref: '#/responses/StatusResponse'
+  /test/upload:
+    put:
+      requestBody:
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          $ref: '#/responses/StatusResponse'
   /route/referring/recursive/object:
     post:
       responses:

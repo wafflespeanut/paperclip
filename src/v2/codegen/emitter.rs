@@ -1212,6 +1212,7 @@ fn matching_unit_type(
         Some(DataTypeFormat::Int64) => Some("i64"),
         Some(DataTypeFormat::Float) => Some("f32"),
         Some(DataTypeFormat::Double) => Some("f64"),
+        Some(DataTypeFormat::Binary) => Some("Vec<u8>"),
         _ => match type_ {
             Some(DataType::Integer) => Some("i64"),
             Some(DataType::Number) => Some("f64"),
