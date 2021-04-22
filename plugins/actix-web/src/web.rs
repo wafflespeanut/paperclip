@@ -35,12 +35,13 @@ const METHODS: &[Method] = &[
 /* Resource */
 
 /// Wrapper for [`actix_web::Resource`](https://docs.rs/actix-web/*/actix_web/struct.Resource.html)
-pub struct Resource<R = actix_web::Resource> {
+pub struct Resource<R = actix_web::Resource, N = ()> {
     path: String,
     operations: BTreeMap<HttpMethod, DefaultOperationRaw>,
     definitions: BTreeMap<String, DefaultSchemaRaw>,
     security: BTreeMap<String, SecurityScheme>,
     inner: R,
+    api_transformations: N,
 }
 
 impl Resource {
@@ -52,11 +53,12 @@ impl Resource {
             definitions: BTreeMap::new(),
             security: BTreeMap::new(),
             inner: actix_web::Resource::new(path),
+            api_transformations: (),
         }
     }
 }
 
-impl<T> HttpServiceFactory for Resource<actix_web::Resource<T>>
+impl<T, N> HttpServiceFactory for Resource<actix_web::Resource<T>, N>
 where
     T: ServiceFactory<
             Config = (),
@@ -86,7 +88,7 @@ where
     }
 }
 
-impl<T> Mountable for Resource<T> {
+impl<T, N> Mountable for Resource<T, N> {
     fn path(&self) -> &str {
         &self.path
     }
@@ -104,7 +106,7 @@ impl<T> Mountable for Resource<T> {
     }
 }
 
-impl<T> Resource<actix_web::Resource<T>>
+impl<T, N> Resource<actix_web::Resource<T>, N>
 where
     T: ServiceFactory<
         Config = (),
@@ -113,6 +115,7 @@ where
         Error = Error,
         InitError = (),
     >,
+    N: TransformApi,
 {
     /// Proxy for [`actix_web::Resource::name`](https://docs.rs/actix-web/*/actix_web/struct.Resource.html#method.name).
     ///
@@ -132,7 +135,9 @@ where
 
     /// Wrapper for [`actix_web::Resource::route`](https://docs.rs/actix-web/*/actix_web/struct.Resource.html#method.route).
     pub fn route(mut self, route: Route) -> Self {
-        let w = RouteWrapper::from(&self.path, route);
+        let w = self
+            .api_transformations
+            .transform(RouteWrapper::from(&self.path, route));
         self.operations.extend(w.operations.into_iter());
         self.definitions.extend(w.definitions.into_iter());
         SecurityScheme::append_map(w.security, &mut self.security);
@@ -172,7 +177,7 @@ where
 
     /// Proxy for [`actix_web::web::Resource::wrap`](https://docs.rs/actix-web/*/actix_web/struct.Resource.html#method.wrap).
     ///
-    /// **NOTE:** This doesn't affect spec generation.
+    /// The proxy adds to the signature of `wrap`'s actix-web `Transform` type that `paperclip::actix::web::TransformApi` is implemented. It can be used to transform the spec operations based on this middleware.
     pub fn wrap<M>(
         self,
         mw: M,
@@ -186,22 +191,25 @@ where
                 InitError = (),
             >,
         >,
+        (N, M),
     >
     where
         M: Transform<
-            T::Service,
-            Request = ServiceRequest,
-            Response = ServiceResponse,
-            Error = Error,
-            InitError = (),
-        >,
+                T::Service,
+                Request = ServiceRequest,
+                Response = ServiceResponse,
+                Error = Error,
+                InitError = (),
+            > + TransformApi
+            + Clone,
     {
         Resource {
             path: self.path,
             operations: self.operations,
             definitions: self.definitions,
             security: self.security,
-            inner: self.inner.wrap(mw),
+            inner: self.inner.wrap(mw.clone()),
+            api_transformations: (self.api_transformations, mw),
         }
     }
 
@@ -221,6 +229,7 @@ where
                 InitError = (),
             >,
         >,
+        N,
     >
     where
         F: FnMut(ServiceRequest, &mut T::Service) -> R + Clone,
@@ -232,6 +241,7 @@ where
             definitions: self.definitions,
             security: self.security,
             inner: self.inner.wrap_fn(mw),
+            api_transformations: self.api_transformations,
         }
     }
 
@@ -635,11 +645,11 @@ pub fn head() -> Route {
 /// us to call the `.route` method on that entity rather than creating a resource with a
 /// route. This wrapper is `Mountable` and can be used by `App`, `Scope`, etc. when calling
 /// the `.route()` method.
-pub(crate) struct RouteWrapper<S> {
+pub struct RouteWrapper<S> {
     path: S,
-    pub(crate) operations: BTreeMap<HttpMethod, DefaultOperationRaw>,
-    pub(crate) definitions: BTreeMap<String, DefaultSchemaRaw>,
-    pub(crate) security: BTreeMap<String, SecurityScheme>,
+    pub operations: BTreeMap<HttpMethod, DefaultOperationRaw>,
+    pub definitions: BTreeMap<String, DefaultSchemaRaw>,
+    pub security: BTreeMap<String, SecurityScheme>,
     pub(crate) inner: actix_web::Route,
 }
 
@@ -689,6 +699,25 @@ where
 
     fn definitions(&mut self) -> BTreeMap<String, DefaultSchemaRaw> {
         mem::replace(&mut self.definitions, BTreeMap::new())
+    }
+}
+
+pub trait TransformApi {
+    /// Perform a transformation on the api operations of the route based on the properties of this middleware
+    fn transform<S>(&self, route: RouteWrapper<S>) -> RouteWrapper<S> {
+        route
+    }
+}
+
+impl TransformApi for () {}
+
+impl<N, M> TransformApi for (N, M)
+where
+    N: TransformApi,
+    M: TransformApi,
+{
+    fn transform<S>(&self, route: RouteWrapper<S>) -> RouteWrapper<S> {
+        self.1.transform(self.0.transform(route))
     }
 }
 
