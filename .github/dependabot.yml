@@ -1,0 +1,15 @@
+version: 2
+updates:
+- package-ecosystem: cargo
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "23:30"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: actix-http
+    versions:
+    - ">= 2.a, < 3"
+  - dependency-name: actix-web
+    versions:
+    - ">= 3.a, < 4"
