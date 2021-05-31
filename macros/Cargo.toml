@@ -22,7 +22,7 @@ heck = { version = "0.3", optional = true }
 http = { version = "0.2", optional = true }
 lazy_static = { version = "1.4", optional = true }
 strum = { version = "0.19", optional = true }
-strum_macros = { version = "0.19", optional = true }
+strum_macros = { version = "0.21", optional = true }
 
 [features]
 actix = ["heck", "http", "lazy_static", "strum", "strum_macros"]
