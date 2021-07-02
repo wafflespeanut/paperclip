@@ -1,6 +1,6 @@
 # Host OpenAPI v2 spec through actix-web
 
-With `actix` feature enabled, paperclip exports an **experimental** plugin for [actix-web](https://github.com/actix/actix-web) framework to host OpenAPI v2 spec for your APIs *automatically*. While it's not feature complete, you can rely on it to not break your actix-web flow.
+With `actix` feature enabled, paperclip exports a plugin for [actix-web](https://github.com/actix/actix-web) framework to host OpenAPI v2 spec for your APIs *automatically*. While it's not feature complete, you can rely on it to not break your actix-web flow.
 
 Let's start with a simple actix-web application. It has `actix-web` and `serde` for JSON'ifying your APIs. Let's also add `paperclip` with `actix` feature.
 
@@ -14,7 +14,7 @@ actix-web = "3.0"
 # this plugin works smoothly with the nightly compiler, it also works in stable
 # channel (replace "actix-nightly" feature with "actix" in that case). There maybe compilation errors,
 # but those can be fixed.
-paperclip = { version = "0.4", features = ["actix-nightly"] }
+paperclip = { version = "0.5", features = ["actix"] }
 serde = "1.0"
 ```
 
