@@ -18,7 +18,7 @@ path = "src/bin/main.rs"
 required-features = ["cli"]
 
 [dependencies]
-env_logger = { version = "0.8", optional = true }
+env_logger = { version = "0.9", optional = true }
 git2 = { version = "0.13", optional = true }
 heck = { version = "0.3", optional = true }
 http = { version = "0.2", optional = true }
@@ -52,7 +52,7 @@ uuid_dev = { version = "0.8", features = ["serde"], package = "uuid" }
 reqwest = { version = "0.10", features = ["blocking", "json"] }
 log = { version = "0.4", features = ["kv_unstable"] }
 insta = "1.0"
-env_logger = "0.8"
+env_logger = "0.9"
 
 [features]
 # actix-web support
